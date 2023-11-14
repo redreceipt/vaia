@@ -1,13 +1,20 @@
-import argparse
 import json
+import os
+import time
+from datetime import datetime
 
-import psycopg
+import schedule
 from dotenv import load_dotenv
 from openai import OpenAI
+from twilio.rest import Client
 
 load_dotenv()
 
-client = OpenAI()
+openai_client = OpenAI()
+
+account_sid = os.environ["TWILIO_ACCOUNT_SID"]
+auth_token = os.environ["TWILIO_AUTH_TOKEN"]
+twilio_client = Client(account_sid, auth_token)
 
 
 def create_todo(user_input, messages=[]):
@@ -15,18 +22,24 @@ def create_todo(user_input, messages=[]):
         messages = [
             {
                 "role": "system",
-                "content": """
+                "content": f"""
                         You are a helpful assistant designed to output JSON.
-                        You are given a user input and asked to turn it into a todo item.
-                        Try to make assumptions about a valid description and reminder time
-                        from the initial user input. If you don't have enough information,
-                        for a concise item description and a reminder time, keep asking questions
-                        until you have enough information, and then confrim with the user.
+                        You are given a user input and asked to turn it into a reminder.
+                        The users current time is {datetime.now().strftime("%H:%M")}.
+                        Try to make assumptions about the reminder and reminder time
+                        from the initial user input. If you don't have enough information
+                        to create the reminder, keep asking questions
+                        until you have enough information, and then confirm with the user.
                         Once the user confirms, output the final message in JSON format
-                        with description, reminder_time, and confirmation keys.
-                        Format the reminder_time as a string in ISO 8601 format in the America/New_York timezone.
+                        with reminder, reminder_time, and confirmation keys.
+                        Format the reminder_time as HH:MM in 24H format.
                         The confirmation key should be the message you are giving to the user confirming
-                        the details of the reminder in a friendly, concise format, well suited for an SMS response.
+                        the details of the reminder in a friendly, concise, conversational format,
+                        well suited for an SMS response.
+                        The reminder key should be reformatted to be in the form of reminding the user
+                        of the event they requested.
+                        For example, if the user input is "Remind me to call my mom tomorrow at 9am",
+                        the reminder key should be "Call your mom" and the reminder_time key should be "09:00".
                     """,
             },
         ]
@@ -37,7 +50,7 @@ def create_todo(user_input, messages=[]):
             "content": user_input,
         }
     )
-    response = client.chat.completions.create(
+    response = openai_client.chat.completions.create(
         model="gpt-3.5-turbo-1106",
         messages=messages,
     )
@@ -56,18 +69,25 @@ def create_todo(user_input, messages=[]):
         return create_todo(new_input, messages)
 
 
-def add_todo(description, reminder_time, confirmation):
-    print(confirmation)
-    exit()
-    with psycopg.connect(DATABASE_URL) as conn:
-        with conn.cursor() as curs:
-            curs.execute(
-                "INSERT INTO todo (description) VALUES (%s)",
-                (description,),
-            )
+def add_todo(reminder, reminder_time, confirmation):
+    twilio_client.messages.create(
+        body=confirmation, from_="+18888519354", to="+18036226599"
+    )
+
+    def job():
+        twilio_client.messages.create(
+            body=reminder, from_="+18888519354", to="+18036226599"
+        )
+        return schedule.CancelJob
+
+    schedule.every().day.at(reminder_time, "America/New_York").do(job)
 
 
 if __name__ == "__main__":
     prompt = input("Prompt: ")
     todo = create_todo(prompt)
-    add_todo(todo["description"], todo["reminder_time"], todo["confirmation"])
+    print(todo)
+    add_todo(todo["reminder"], todo["reminder_time"], todo["confirmation"])
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
