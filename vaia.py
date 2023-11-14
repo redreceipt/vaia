@@ -14,6 +14,8 @@ openai_client = OpenAI()
 
 account_sid = os.environ["TWILIO_ACCOUNT_SID"]
 auth_token = os.environ["TWILIO_AUTH_TOKEN"]
+to_number = os.environ["TWILIO_TO_NUMBER"]
+from_number = os.environ["TWILIO_FROM_NUMBER"]
 twilio_client = Client(account_sid, auth_token)
 
 
@@ -70,14 +72,10 @@ def create_todo(user_input, messages=[]):
 
 
 def add_todo(reminder, reminder_time, confirmation):
-    twilio_client.messages.create(
-        body=confirmation, from_="+18888519354", to="+18036226599"
-    )
+    twilio_client.messages.create(body=confirmation, from_=from_number, to=to_number)
 
     def job():
-        twilio_client.messages.create(
-            body=reminder, from_="+18888519354", to="+18036226599"
-        )
+        twilio_client.messages.create(body=reminder, from_=from_number, to=to_number)
         return schedule.CancelJob
 
     schedule.every().day.at(reminder_time, "America/New_York").do(job)
